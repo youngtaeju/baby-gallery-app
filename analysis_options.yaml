@@ -1,0 +1,4 @@
+# Dart 정적 분석 설정. `flutter analyze`로 실행.
+# 규칙 추가/해제는 linter.rules 아래에 기술. 목록: https://dart.dev/lints
+
+include: package:flutter_lints/flutter.yaml
