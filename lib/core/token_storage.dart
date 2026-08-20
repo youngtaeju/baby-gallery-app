@@ -1,7 +1,10 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// access / refresh token 보관소. Android EncryptedSharedPreferences 사용.
+///
+/// 요청마다 복호화가 발생하지 않도록 최초 조회분을 메모리에 유지.
 class TokenStorage {
   TokenStorage(this._storage);
 
@@ -10,21 +13,66 @@ class TokenStorage {
 
   final FlutterSecureStorage _storage;
 
-  Future<String?> readAccessToken() => _storage.read(key: _accessTokenKey);
+  String? _accessToken;
 
-  Future<String?> readRefreshToken() => _storage.read(key: _refreshTokenKey);
+  String? _refreshToken;
+
+  bool _loaded = false;
+
+  Future<String?> readAccessToken() async {
+    await _ensureLoaded();
+
+    return _accessToken;
+  }
+
+  Future<String?> readRefreshToken() async {
+    await _ensureLoaded();
+
+    return _refreshToken;
+  }
 
   Future<void> save({
     required String accessToken,
     required String refreshToken,
   }) async {
+    _accessToken = accessToken;
+    _refreshToken = refreshToken;
+    _loaded = true;
+
     await _storage.write(key: _accessTokenKey, value: accessToken);
     await _storage.write(key: _refreshTokenKey, value: refreshToken);
   }
 
   Future<void> clear() async {
+    _accessToken = null;
+    _refreshToken = null;
+    _loaded = true;
+
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
+  }
+
+  Future<void> _ensureLoaded() async {
+    if (_loaded) {
+      return;
+    }
+
+    try {
+      _accessToken = await _storage.read(key: _accessTokenKey);
+      _refreshToken = await _storage.read(key: _refreshTokenKey);
+    } on PlatformException {
+      // 기기 백업 복원·키 손상 시 복호화 실패. 저장분 폐기 후 재로그인 경로.
+      _accessToken = null;
+      _refreshToken = null;
+
+      try {
+        await clear();
+      } on PlatformException {
+        // 삭제 실패분은 다음 로그인 성공 시 덮어쓰기.
+      }
+    }
+
+    _loaded = true;
   }
 }
 
