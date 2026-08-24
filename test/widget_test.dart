@@ -1,6 +1,7 @@
 import 'package:family_gallery/app.dart';
 import 'package:family_gallery/features/auth/auth_controller.dart';
 import 'package:family_gallery/features/auth/auth_models.dart';
+import 'package:family_gallery/features/gallery/media_list_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,18 +15,26 @@ class _FixedAuthController extends AuthController {
   Future<AuthUser?> build() async => _user;
 }
 
+class _EmptyMediaListController extends MediaListController {
+  @override
+  Future<MediaListState> build() async {
+    return MediaListState(items: [], nextCursor: null);
+  }
+}
+
 Future<void> _pumpApp(WidgetTester tester, AuthUser? user) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         authControllerProvider.overrideWith(() => _FixedAuthController(user)),
+        mediaListControllerProvider.overrideWith(_EmptyMediaListController.new),
       ],
       child: const FamilyGalleryApp(),
     ),
   );
 
-  // build가 Future를 반환하므로 첫 프레임은 로딩 상태.
-  await tester.pump();
+  // 인증·미디어 목록의 비동기 build 완료 대기.
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -46,6 +55,7 @@ void main() {
       ),
     );
 
-    expect(find.text('테스터'), findsOneWidget);
+    expect(find.text('가족 갤러리'), findsOneWidget);
+    expect(find.text('아직 미디어가 없습니다.'), findsOneWidget);
   });
 }

@@ -1,10 +1,10 @@
 # family-gallery-app
 
-가정용 시놀로지 NAS의 이미지·영상을 가족 구성원만 조회하는 갤러리 앱. Android APK 배포.
+가정용 시놀로지 NAS의 이미지·영상을 가족 구성원만 이용하는 갤러리 앱. Android APK 배포.
 
-- 미디어 조회 전용. 업로드·수정·삭제 기능 없음
-- 백엔드는 `family-gallery-api` 단독. 통신은 HTTPS만 허용
-- 모든 사용자 동일한 `viewer` 권한. 역할 구분 없음
+- 로그인한 사용자는 전체 미디어 조회 가능
+- 권한은 `viewer` / `editor` 2종. 업로드·삭제는 `editor`만 가능
+- 백엔드는 `family-gallery-api` 단독. 운영 통신은 HTTPS만 허용
 
 ## 요구 사항
 
@@ -19,14 +19,26 @@ lib/
   app.dart               MaterialApp, 테마
   core/                  기능에 묶이지 않는 공통 인프라
     app_config.dart      빌드 시점 주입 설정
-    api_client.dart      Dio 인스턴스 provider
+    api_client.dart      인증 인터셉터가 연결된 Dio provider
+    auth_interceptor.dart access token 주입·갱신·재요청
     token_storage.dart   access / refresh token 보관소
-  features/              기능 단위 폴더. 화면·상태·API 호출을 같은 위치에 배치
+  features/
+    auth/                인증 모델·API·상태·화면
+    gallery/             미디어 모델·목록 상태·썸네일·그리드 화면
 android/                 Android 전용 빌드 설정
 test/
 ```
 
 상태 관리는 Riverpod, HTTP는 Dio, 토큰 보관은 flutter_secure_storage.
+썸네일은 `dio_cache_interceptor`와 파일 저장소를 통해 서버의 `Cache-Control`·`ETag`를 따름.
+
+## 미디어 목록
+
+- `GET /media`를 기본 50건씩 조회하고 `nextCursor`로 다음 페이지 연결
+- 촬영일시는 기기 로컬 시각으로 변환해 날짜별 그룹 표시
+- 썸네일은 기존 Dio 인증 흐름을 공유하므로 access token 만료 시 갱신 후 재요청
+- 썸네일 캐시는 앱 전용 cache directory에 저장. 다른 GET 응답에는 캐시 정책 미적용
+- HEIC·HEIF처럼 서버에서 썸네일을 제공하지 못하는 항목은 대체 아이콘 표시
 
 ## 설정
 

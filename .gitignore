@@ -44,5 +44,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# 로컬 참고용 문서
+# 로컬 개발 도구 설정
+.claude
+.agents
 CLAUDE.md
+AGENTS.md
+
