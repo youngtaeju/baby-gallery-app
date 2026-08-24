@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 미디어 조회 전용. HTTPS만 사용하므로 cleartext 미허용 -->
+    <!-- 운영 통신은 HTTPS만 허용 -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
