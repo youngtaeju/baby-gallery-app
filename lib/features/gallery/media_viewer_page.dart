@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:photo_view/photo_view.dart';
 
 import 'media_list_controller.dart';
 import 'media_models.dart';
+import 'original_image_loader.dart';
 import 'thumbnail_loader.dart';
 
 class MediaViewerPage extends ConsumerStatefulWidget {
@@ -87,14 +89,17 @@ class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
 
           return Stack(
             children: [
-              PageView.builder(
-                key: const Key('media-viewer-pages'),
-                controller: _pageController,
-                itemCount: state.items.length,
-                onPageChanged: _onPageChanged,
-                itemBuilder: (context, index) => _ViewerPage(
-                  key: ValueKey('viewer-media-${state.items[index].id}'),
-                  item: state.items[index],
+              PhotoViewGestureDetectorScope(
+                axis: Axis.horizontal,
+                child: PageView.builder(
+                  key: const Key('media-viewer-pages'),
+                  controller: _pageController,
+                  itemCount: state.items.length,
+                  onPageChanged: _onPageChanged,
+                  itemBuilder: (context, index) => _ViewerPage(
+                    key: ValueKey('viewer-media-${state.items[index].id}'),
+                    item: state.items[index],
+                  ),
                 ),
               ),
               if (state.isLoadingMore)
@@ -130,13 +135,15 @@ class _ViewerPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (item.mediaType == MediaType.image) {
+      return _ImageViewerPage(item: item);
+    }
+
     final loader = ref.watch(thumbnailLoaderProvider);
 
     return Semantics(
       image: true,
-      label: item.mediaType == MediaType.video
-          ? '${item.fileName}, 동영상'
-          : '${item.fileName}, 이미지',
+      label: '${item.fileName}, 동영상',
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
@@ -152,16 +159,94 @@ class _ViewerPage extends ConsumerWidget {
                     const _ViewerUnavailable(),
               ),
             ),
-            if (item.mediaType == MediaType.video)
-              const Center(
-                child: Icon(
-                  Icons.play_circle_outline,
-                  color: Colors.white,
-                  size: 72,
-                ),
+            const Center(
+              child: Icon(
+                Icons.play_circle_outline,
+                color: Colors.white,
+                size: 72,
               ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ImageViewerPage extends ConsumerStatefulWidget {
+  const _ImageViewerPage({required this.item});
+
+  final MediaItem item;
+
+  @override
+  ConsumerState<_ImageViewerPage> createState() => _ImageViewerPageState();
+}
+
+class _ImageViewerPageState extends ConsumerState<_ImageViewerPage> {
+  int _reloadVersion = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final loader = ref.watch(originalImageLoaderProvider);
+
+    return loader.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, stackTrace) => _ViewerLoadFailure(onRetry: _retryLoader),
+      data: (loader) {
+        final provider = loader.imageProvider(widget.item.id);
+
+        return PhotoView(
+          key: ValueKey('original-${widget.item.id}-$_reloadVersion'),
+          imageProvider: provider,
+          semanticLabel: '${widget.item.fileName}, 이미지',
+          backgroundDecoration: const BoxDecoration(color: Colors.black),
+          initialScale: PhotoViewComputedScale.contained,
+          minScale: PhotoViewComputedScale.contained,
+          maxScale: PhotoViewComputedScale.covered * 3,
+          filterQuality: FilterQuality.high,
+          loadingBuilder: (context, progress) {
+            final total = progress?.expectedTotalBytes;
+            final value = total == null || total <= 0
+                ? null
+                : progress!.cumulativeBytesLoaded / total;
+
+            return Center(child: CircularProgressIndicator(value: value));
+          },
+          errorBuilder: (context, error, stackTrace) => _ViewerLoadFailure(
+            onRetry: () {
+              PaintingBinding.instance.imageCache.evict(provider);
+              setState(() => _reloadVersion++);
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  void _retryLoader() {
+    ref.invalidate(originalImageLoaderProvider);
+  }
+}
+
+class _ViewerLoadFailure extends StatelessWidget {
+  const _ViewerLoadFailure({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.broken_image_outlined,
+            color: Colors.white70,
+            size: 48,
+          ),
+          const SizedBox(height: 12),
+          TextButton(onPressed: onRetry, child: const Text('다시 시도')),
+        ],
       ),
     );
   }
