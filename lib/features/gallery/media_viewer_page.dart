@@ -22,10 +22,18 @@ class MediaViewerPage extends ConsumerStatefulWidget {
 
 class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
   static const int _loadMoreThreshold = 5;
+  static const double _dismissDistance = 120;
 
   late final PageController _pageController;
   late int _currentIndex;
   int? _lastLoadMoreItemCount;
+  bool _showControls = true;
+  bool _canDismiss = true;
+  final Map<int, bool> _dismissAvailability = {};
+  int? _dismissPointer;
+  Offset? _dismissStart;
+  Offset? _dismissPosition;
+  final Set<int> _activePointers = {};
 
   @override
   void initState() {
@@ -59,8 +67,66 @@ class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
   }
 
   void _onPageChanged(int index) {
-    setState(() => _currentIndex = index);
+    setState(() {
+      _currentIndex = index;
+      _canDismiss = _dismissAvailability[index] ?? true;
+    });
     _loadMoreIfNeeded();
+  }
+
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _activePointers.add(event.pointer);
+
+    if (_activePointers.length == 1 && _canDismiss) {
+      _dismissPointer = event.pointer;
+      _dismissStart = event.position;
+      _dismissPosition = event.position;
+    } else {
+      _clearDismissCandidate();
+    }
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (event.pointer == _dismissPointer) {
+      _dismissPosition = event.position;
+    }
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    final shouldDismiss =
+        event.pointer == _dismissPointer &&
+        _isDismissGesture(_dismissStart, _dismissPosition);
+
+    _activePointers.remove(event.pointer);
+    _clearDismissCandidate();
+
+    if (shouldDismiss) {
+      Navigator.maybePop(context);
+    }
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    _activePointers.remove(event.pointer);
+    _clearDismissCandidate();
+  }
+
+  bool _isDismissGesture(Offset? start, Offset? end) {
+    if (start == null || end == null) {
+      return false;
+    }
+
+    final delta = end - start;
+    return delta.dy >= _dismissDistance && delta.dy > delta.dx.abs();
+  }
+
+  void _clearDismissCandidate() {
+    _dismissPointer = null;
+    _dismissStart = null;
+    _dismissPosition = null;
   }
 
   @override
@@ -73,11 +139,6 @@ class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      ),
       body: media.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stackTrace) => const _ViewerUnavailable(),
@@ -93,17 +154,32 @@ class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
 
           return Stack(
             children: [
-              PhotoViewGestureDetectorScope(
-                axis: Axis.horizontal,
-                child: PageView.builder(
-                  key: const Key('media-viewer-pages'),
-                  controller: _pageController,
-                  itemCount: state.items.length,
-                  onPageChanged: _onPageChanged,
-                  itemBuilder: (context, index) => _ViewerPage(
-                    key: ValueKey('viewer-media-${state.items[index].id}'),
-                    item: state.items[index],
-                    isActive: index == _currentIndex,
+              Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: _onPointerDown,
+                onPointerMove: _onPointerMove,
+                onPointerUp: _onPointerUp,
+                onPointerCancel: _onPointerCancel,
+                child: PhotoViewGestureDetectorScope(
+                  axis: Axis.horizontal,
+                  child: PageView.builder(
+                    key: const Key('media-viewer-pages'),
+                    controller: _pageController,
+                    itemCount: state.items.length,
+                    onPageChanged: _onPageChanged,
+                    itemBuilder: (context, index) => _ViewerPage(
+                      key: ValueKey('viewer-media-${state.items[index].id}'),
+                      item: state.items[index],
+                      isActive: index == _currentIndex,
+                      onTap: _toggleControls,
+                      onDismissAvailabilityChanged: (canDismiss) {
+                        _dismissAvailability[index] = canDismiss;
+
+                        if (index == _currentIndex) {
+                          _canDismiss = canDismiss;
+                        }
+                      },
+                    ),
                   ),
                 ),
               ),
@@ -125,6 +201,11 @@ class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
                         .loadMore(),
                   ),
                 ),
+              _ViewerTopControls(
+                title: title,
+                visible: _showControls,
+                onBack: () => Navigator.maybePop(context),
+              ),
             ],
           );
         },
@@ -134,26 +215,43 @@ class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
 }
 
 class _ViewerPage extends ConsumerWidget {
-  const _ViewerPage({required this.item, required this.isActive, super.key});
+  const _ViewerPage({
+    required this.item,
+    required this.isActive,
+    required this.onTap,
+    required this.onDismissAvailabilityChanged,
+    super.key,
+  });
 
   final MediaItem item;
   final bool isActive;
+  final VoidCallback onTap;
+  final ValueChanged<bool> onDismissAvailabilityChanged;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (item.mediaType == MediaType.image) {
-      return _ImageViewerPage(item: item);
+      return _ImageViewerPage(
+        item: item,
+        onTap: onTap,
+        onDismissAvailabilityChanged: onDismissAvailabilityChanged,
+      );
     }
 
-    return _VideoViewerPage(item: item, isActive: isActive);
+    return _VideoViewerPage(item: item, isActive: isActive, onTap: onTap);
   }
 }
 
 class _VideoViewerPage extends ConsumerStatefulWidget {
-  const _VideoViewerPage({required this.item, required this.isActive});
+  const _VideoViewerPage({
+    required this.item,
+    required this.isActive,
+    required this.onTap,
+  });
 
   final MediaItem item;
   final bool isActive;
+  final VoidCallback onTap;
 
   @override
   ConsumerState<_VideoViewerPage> createState() => _VideoViewerPageState();
@@ -312,32 +410,36 @@ class _VideoViewerPageState extends ConsumerState<_VideoViewerPage>
   Widget build(BuildContext context) {
     final controller = _controller;
 
-    return Semantics(
-      label: '${widget.item.fileName}, 동영상',
-      child: ColoredBox(
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            _VideoThumbnail(item: widget.item),
-            if (_error != null)
-              _ViewerLoadFailure(onRetry: _initialize)
-            else if (controller == null ||
-                _isInitializing ||
-                !controller.value.isInitialized)
-              const Center(child: CircularProgressIndicator())
-            else ...[
-              Center(
-                child: AspectRatio(
-                  aspectRatio: controller.value.aspectRatio,
-                  child: controller.buildView(),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      child: Semantics(
+        label: '${widget.item.fileName}, 동영상',
+        child: ColoredBox(
+          color: Colors.black,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _VideoThumbnail(item: widget.item),
+              if (_error != null)
+                _ViewerLoadFailure(onRetry: _initialize)
+              else if (controller == null ||
+                  _isInitializing ||
+                  !controller.value.isInitialized)
+                const Center(child: CircularProgressIndicator())
+              else ...[
+                Center(
+                  child: AspectRatio(
+                    aspectRatio: controller.value.aspectRatio,
+                    child: controller.buildView(),
+                  ),
                 ),
-              ),
-              _VideoControls(controller: controller),
-              if (controller.value.isBuffering)
-                const Center(child: CircularProgressIndicator()),
+                _VideoControls(controller: controller),
+                if (controller.value.isBuffering)
+                  const Center(child: CircularProgressIndicator()),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -467,9 +569,15 @@ String _formatViewerDuration(Duration duration) {
 }
 
 class _ImageViewerPage extends ConsumerStatefulWidget {
-  const _ImageViewerPage({required this.item});
+  const _ImageViewerPage({
+    required this.item,
+    required this.onTap,
+    required this.onDismissAvailabilityChanged,
+  });
 
   final MediaItem item;
+  final VoidCallback onTap;
+  final ValueChanged<bool> onDismissAvailabilityChanged;
 
   @override
   ConsumerState<_ImageViewerPage> createState() => _ImageViewerPageState();
@@ -497,6 +605,12 @@ class _ImageViewerPageState extends ConsumerState<_ImageViewerPage> {
           minScale: PhotoViewComputedScale.contained,
           maxScale: PhotoViewComputedScale.covered * 3,
           filterQuality: FilterQuality.high,
+          onTapUp: (context, details, value) => widget.onTap(),
+          scaleStateChangedCallback: (state) {
+            widget.onDismissAvailabilityChanged(
+              state == PhotoViewScaleState.initial,
+            );
+          },
           loadingBuilder: (context, progress) {
             final total = progress?.expectedTotalBytes;
             final value = total == null || total <= 0
@@ -518,6 +632,72 @@ class _ImageViewerPageState extends ConsumerState<_ImageViewerPage> {
 
   void _retryLoader() {
     ref.invalidate(originalImageLoaderProvider);
+  }
+}
+
+class _ViewerTopControls extends StatelessWidget {
+  const _ViewerTopControls({
+    required this.title,
+    required this.visible,
+    required this.onBack,
+  });
+
+  final String title;
+  final bool visible;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 0,
+      top: 0,
+      right: 0,
+      child: IgnorePointer(
+        key: const Key('viewer-top-controls'),
+        ignoring: !visible,
+        child: AnimatedSlide(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          offset: visible ? Offset.zero : const Offset(0, -1),
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 180),
+            opacity: visible ? 1 : 0,
+            child: ColoredBox(
+              color: Colors.black54,
+              child: SafeArea(
+                bottom: false,
+                child: SizedBox(
+                  height: kToolbarHeight,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: onBack,
+                        color: Colors.white,
+                        tooltip: MaterialLocalizations.of(
+                          context,
+                        ).backButtonTooltip,
+                        icon: const Icon(Icons.arrow_back),
+                      ),
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.titleLarge?.copyWith(color: Colors.white),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
