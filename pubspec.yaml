@@ -20,6 +20,8 @@ dependencies:
   path_provider: ^2.1.6
   # 11.x는 compileSdk 37 요구. 로컬 SDK가 android-37.0으로 설치되어 미해결.
   flutter_secure_storage: ^10.0.0
+  photo_view: ^0.15.0
+  video_player: ^2.14.0
 
 dev_dependencies:
   flutter_test:

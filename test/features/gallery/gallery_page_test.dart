@@ -78,6 +78,69 @@ void main() {
     expect(find.text('1:02:03'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('선택한 미디어부터 뷰어를 열고 좌우로 이동한다', (tester) async {
+    final state = MediaListState(
+      items: [
+        _item(id: 3, capturedAt: DateTime(2026, 8, 24)),
+        _item(id: 2, capturedAt: DateTime(2026, 8, 24)),
+        _item(id: 1, capturedAt: DateTime(2026, 8, 24)),
+      ],
+      nextCursor: null,
+    );
+
+    await _pumpGallery(tester, _FixedMediaListController(state));
+
+    await tester.tap(find.byKey(const ValueKey('media-tile-2')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byKey(const Key('media-viewer-pages')), findsOneWidget);
+    expect(find.text('2.jpg'), findsOneWidget);
+
+    await tester.fling(
+      find.byKey(const Key('media-viewer-pages')),
+      const Offset(-500, 0),
+      1000,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('1.jpg'), findsOneWidget);
+  });
+
+  testWidgets('뷰어에서 돌아오면 갤러리 스크롤 위치를 유지한다', (tester) async {
+    final state = MediaListState(
+      items: [
+        for (var id = 30; id >= 1; id--)
+          _item(id: id, capturedAt: DateTime(2026, 8, 24)),
+      ],
+      nextCursor: null,
+    );
+
+    await _pumpGallery(tester, _FixedMediaListController(state));
+    final target = find.byKey(const ValueKey('media-tile-10'));
+    final scrollableFinder = find.descendant(
+      of: find.byKey(const Key('gallery-scroll')),
+      matching: find.byType(Scrollable),
+    );
+
+    await tester.scrollUntilVisible(target, 300, scrollable: scrollableFinder);
+    await tester.pump();
+
+    final scrollable = tester.state<ScrollableState>(scrollableFinder);
+    final offsetBeforeOpen = scrollable.position.pixels;
+
+    await tester.tap(target);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pageBack();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(scrollable.position.pixels, offsetBeforeOpen);
+    expect(find.byKey(const ValueKey('media-tile-10')), findsOneWidget);
+  });
 }
 
 Future<void> _pumpGallery(
