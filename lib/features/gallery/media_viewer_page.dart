@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:video_player/video_player.dart';
 
 import 'media_list_controller.dart';
 import 'media_models.dart';
 import 'original_image_loader.dart';
 import 'thumbnail_loader.dart';
+import 'video_streaming.dart';
 
 class MediaViewerPage extends ConsumerStatefulWidget {
   const MediaViewerPage({required this.initialIndex, super.key});
@@ -99,6 +103,7 @@ class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
                   itemBuilder: (context, index) => _ViewerPage(
                     key: ValueKey('viewer-media-${state.items[index].id}'),
                     item: state.items[index],
+                    isActive: index == _currentIndex,
                   ),
                 ),
               ),
@@ -129,9 +134,10 @@ class _MediaViewerPageState extends ConsumerState<MediaViewerPage> {
 }
 
 class _ViewerPage extends ConsumerWidget {
-  const _ViewerPage({required this.item, super.key});
+  const _ViewerPage({required this.item, required this.isActive, super.key});
 
   final MediaItem item;
+  final bool isActive;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -139,38 +145,325 @@ class _ViewerPage extends ConsumerWidget {
       return _ImageViewerPage(item: item);
     }
 
-    final loader = ref.watch(thumbnailLoaderProvider);
+    return _VideoViewerPage(item: item, isActive: isActive);
+  }
+}
+
+class _VideoViewerPage extends ConsumerStatefulWidget {
+  const _VideoViewerPage({required this.item, required this.isActive});
+
+  final MediaItem item;
+  final bool isActive;
+
+  @override
+  ConsumerState<_VideoViewerPage> createState() => _VideoViewerPageState();
+}
+
+class _VideoViewerPageState extends ConsumerState<_VideoViewerPage>
+    with WidgetsBindingObserver {
+  VideoPlaybackController? _controller;
+  Object? _error;
+  bool _isInitializing = false;
+  int _requestVersion = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    if (widget.isActive) {
+      unawaited(_initialize());
+    }
+  }
+
+  @override
+  void didUpdateWidget(_VideoViewerPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.isActive == oldWidget.isActive) {
+      return;
+    }
+
+    if (widget.isActive) {
+      unawaited(_initialize());
+    } else {
+      unawaited(_releaseController());
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      unawaited(_controller?.pause());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _requestVersion++;
+
+    final controller = _controller;
+    _controller = null;
+    controller?.removeListener(_controllerChanged);
+
+    if (controller != null) {
+      unawaited(_pauseAndDispose(controller));
+    }
+
+    super.dispose();
+  }
+
+  Future<void> _initialize() async {
+    if (_isInitializing || _controller != null || !widget.isActive) {
+      return;
+    }
+
+    final requestVersion = ++_requestVersion;
+
+    setState(() {
+      _isInitializing = true;
+      _error = null;
+    });
+
+    VideoPlaybackController? controller;
+
+    try {
+      final source = await ref
+          .read(videoStreamSourceLoaderProvider)
+          .prepare(widget.item.id);
+
+      if (!mounted || !widget.isActive || requestVersion != _requestVersion) {
+        return;
+      }
+
+      controller = ref.read(videoPlaybackControllerFactoryProvider)(source);
+      _controller = controller;
+      controller.addListener(_controllerChanged);
+
+      await controller.initialize();
+
+      if (!mounted || !widget.isActive || requestVersion != _requestVersion) {
+        return;
+      }
+
+      setState(() => _isInitializing = false);
+    } catch (error) {
+      if (controller != null) {
+        controller.removeListener(_controllerChanged);
+        await controller.dispose();
+
+        if (identical(_controller, controller)) {
+          _controller = null;
+        }
+      }
+
+      if (mounted && widget.isActive && requestVersion == _requestVersion) {
+        setState(() {
+          _isInitializing = false;
+          _error = error;
+        });
+      }
+    }
+  }
+
+  Future<void> _releaseController() async {
+    _requestVersion++;
+    final controller = _controller;
+    _controller = null;
+    _isInitializing = false;
+    _error = null;
+
+    if (controller == null) {
+      return;
+    }
+
+    controller.removeListener(_controllerChanged);
+    await _pauseAndDispose(controller);
+  }
+
+  void _controllerChanged() {
+    final controller = _controller;
+
+    if (controller != null && controller.value.hasError) {
+      final description = controller.value.errorDescription;
+
+      _requestVersion++;
+      _controller = null;
+      _isInitializing = false;
+      controller.removeListener(_controllerChanged);
+      unawaited(_pauseAndDispose(controller));
+
+      if (mounted) {
+        setState(() {
+          _error = StateError(description ?? '영상을 재생할 수 없습니다.');
+        });
+      }
+
+      return;
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
 
     return Semantics(
-      image: true,
-      label: '${item.fileName}, 동영상',
+      label: '${widget.item.fileName}, 동영상',
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            loader.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, stackTrace) => const _ViewerUnavailable(),
-              data: (loader) => Image(
-                image: loader.imageProvider(item.id),
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) =>
-                    const _ViewerUnavailable(),
+            _VideoThumbnail(item: widget.item),
+            if (_error != null)
+              _ViewerLoadFailure(onRetry: _initialize)
+            else if (controller == null ||
+                _isInitializing ||
+                !controller.value.isInitialized)
+              const Center(child: CircularProgressIndicator())
+            else ...[
+              Center(
+                child: AspectRatio(
+                  aspectRatio: controller.value.aspectRatio,
+                  child: controller.buildView(),
+                ),
               ),
-            ),
-            const Center(
-              child: Icon(
-                Icons.play_circle_outline,
-                color: Colors.white,
-                size: 72,
-              ),
-            ),
+              _VideoControls(controller: controller),
+              if (controller.value.isBuffering)
+                const Center(child: CircularProgressIndicator()),
+            ],
           ],
         ),
       ),
     );
   }
+}
+
+Future<void> _pauseAndDispose(VideoPlaybackController controller) async {
+  try {
+    await controller.pause();
+  } catch (_) {
+    // 오류 상태에서도 controller 해제 계속 진행.
+  }
+
+  try {
+    await controller.dispose();
+  } catch (_) {
+    // 화면 이탈 정리 실패의 UI 오류 재노출 방지.
+  }
+}
+
+class _VideoThumbnail extends ConsumerWidget {
+  const _VideoThumbnail({required this.item});
+
+  final MediaItem item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final loader = ref.watch(thumbnailLoaderProvider);
+
+    return loader.when(
+      loading: () => const SizedBox.shrink(),
+      error: (error, stackTrace) => const SizedBox.shrink(),
+      data: (loader) => Image(
+        image: loader.imageProvider(item.id),
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+      ),
+    );
+  }
+}
+
+class _VideoControls extends StatelessWidget {
+  const _VideoControls({required this.controller});
+
+  final VideoPlaybackController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = controller.value;
+    final durationMs = value.duration.inMilliseconds;
+    final positionMs = value.position.inMilliseconds.clamp(0, durationMs);
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.7),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: () => _togglePlayback(value),
+                  color: Colors.white,
+                  tooltip: value.isPlaying ? '일시정지' : '재생',
+                  icon: Icon(value.isPlaying ? Icons.pause : Icons.play_arrow),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: positionMs.toDouble(),
+                    max: durationMs <= 0 ? 1 : durationMs.toDouble(),
+                    onChanged: durationMs <= 0
+                        ? null
+                        : (position) => controller.seekTo(
+                            Duration(milliseconds: position.round()),
+                          ),
+                  ),
+                ),
+                Text(
+                  '${_formatViewerDuration(value.position)} / '
+                  '${_formatViewerDuration(value.duration)}',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                IconButton(
+                  onPressed: () =>
+                      controller.setVolume(value.volume == 0 ? 1 : 0),
+                  color: Colors.white,
+                  tooltip: value.volume == 0 ? '음소거 해제' : '음소거',
+                  icon: Icon(
+                    value.volume == 0 ? Icons.volume_off : Icons.volume_up,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _togglePlayback(VideoPlayerValue value) async {
+    if (value.isPlaying) {
+      await controller.pause();
+      return;
+    }
+
+    if (value.isCompleted) {
+      await controller.seekTo(Duration.zero);
+    }
+
+    await controller.play();
+  }
+}
+
+String _formatViewerDuration(Duration duration) {
+  final hours = duration.inHours;
+  final minutes = duration.inMinutes.remainder(60);
+  final seconds = duration.inSeconds.remainder(60);
+
+  if (hours > 0) {
+    return '$hours:${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
+  }
+
+  return '$minutes:${seconds.toString().padLeft(2, '0')}';
 }
 
 class _ImageViewerPage extends ConsumerStatefulWidget {

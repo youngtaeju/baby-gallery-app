@@ -8,10 +8,12 @@ import 'package:family_gallery/features/gallery/media_models.dart';
 import 'package:family_gallery/features/gallery/media_viewer_page.dart';
 import 'package:family_gallery/features/gallery/original_image_loader.dart';
 import 'package:family_gallery/features/gallery/thumbnail_loader.dart';
+import 'package:family_gallery/features/gallery/video_streaming.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:video_player/video_player.dart';
 
 void main() {
   testWidgets('마지막 항목 근처에서 기존 목록에 다음 페이지를 추가한다', (tester) async {
@@ -72,6 +74,120 @@ void main() {
     expect(photoView.minScale, PhotoViewComputedScale.contained);
     expect(photoView.maxScale, isNotNull);
   });
+
+  testWidgets('영상 스트림을 초기화하고 기본 재생 컨트롤을 제공한다', (tester) async {
+    final mediaController = _AppendingMediaListController(
+      MediaListState(
+        items: [_item(1, mediaType: MediaType.video)],
+        nextCursor: null,
+      ),
+    );
+    final sourceLoader = _FakeVideoStreamSourceLoader();
+    final playbackController = _FakeVideoPlaybackController();
+
+    await _pumpViewer(
+      tester,
+      mediaController,
+      initialIndex: 0,
+      videoSourceLoader: sourceLoader,
+      playbackFactory: (source) => playbackController,
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(sourceLoader.preparedIds, [1]);
+    expect(playbackController.initializeCallCount, 1);
+    expect(find.byKey(const Key('fake-video-view')), findsOneWidget);
+    expect(find.text('0:00 / 1:05'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('재생'));
+    await tester.pump();
+
+    expect(playbackController.playCallCount, 1);
+    expect(find.byTooltip('일시정지'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('음소거'));
+    await tester.pump();
+
+    expect(playbackController.volume, 0);
+    expect(find.byTooltip('음소거 해제'), findsOneWidget);
+  });
+
+  testWidgets('영상 페이지를 벗어나면 재생 controller를 해제한다', (tester) async {
+    final mediaController = _AppendingMediaListController(
+      MediaListState(
+        items: [
+          _item(2, mediaType: MediaType.video),
+          _item(1),
+        ],
+        nextCursor: null,
+      ),
+    );
+    final playbackController = _FakeVideoPlaybackController();
+
+    await _pumpViewer(
+      tester,
+      mediaController,
+      initialIndex: 0,
+      videoSourceLoader: _FakeVideoStreamSourceLoader(),
+      playbackFactory: (source) => playbackController,
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final pageView = tester.widget<PageView>(
+      find.byKey(const Key('media-viewer-pages')),
+    );
+
+    pageView.controller!.jumpToPage(1);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('1.jpg'), findsOneWidget);
+    expect(
+      (playbackController.pauseCallCount, playbackController.disposeCallCount),
+      (1, 1),
+    );
+  });
+
+  testWidgets('영상 재생 오류 후 인증 소스부터 다시 준비한다', (tester) async {
+    final mediaController = _AppendingMediaListController(
+      MediaListState(
+        items: [_item(1, mediaType: MediaType.video)],
+        nextCursor: null,
+      ),
+    );
+    final sourceLoader = _FakeVideoStreamSourceLoader();
+    final controllers = [
+      _FakeVideoPlaybackController(),
+      _FakeVideoPlaybackController(),
+    ];
+    var controllerIndex = 0;
+
+    await _pumpViewer(
+      tester,
+      mediaController,
+      initialIndex: 0,
+      videoSourceLoader: sourceLoader,
+      playbackFactory: (source) => controllers[controllerIndex++],
+    );
+    await tester.pump();
+    await tester.pump();
+
+    controllers.first.emitError('HTTP 401');
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('다시 시도'), findsOneWidget);
+    expect(controllers.first.disposeCallCount, 1);
+
+    await tester.tap(find.text('다시 시도'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(sourceLoader.preparedIds, [1, 1]);
+    expect(controllers.last.initializeCallCount, 1);
+  });
 }
 
 Future<void> _pumpViewer(
@@ -79,6 +195,8 @@ Future<void> _pumpViewer(
   _AppendingMediaListController controller, {
   required int initialIndex,
   OriginalImageLoader? originalLoader,
+  VideoStreamSourceLoader? videoSourceLoader,
+  VideoPlaybackControllerFactory? playbackFactory,
 }) async {
   final pendingLoader = Completer<ThumbnailLoader>();
   final pendingOriginalLoader = Completer<OriginalImageLoader>();
@@ -93,6 +211,12 @@ Future<void> _pumpViewer(
               ? pendingOriginalLoader.future
               : Future.value(originalLoader),
         ),
+        if (videoSourceLoader != null)
+          videoStreamSourceLoaderProvider.overrideWithValue(videoSourceLoader),
+        if (playbackFactory != null)
+          videoPlaybackControllerFactoryProvider.overrideWithValue(
+            playbackFactory,
+          ),
       ],
       child: MaterialApp(home: MediaViewerPage(initialIndex: initialIndex)),
     ),
@@ -100,17 +224,105 @@ Future<void> _pumpViewer(
   await tester.pump();
 }
 
-MediaItem _item(int id) {
+MediaItem _item(int id, {MediaType mediaType = MediaType.image}) {
   return MediaItem(
     id: id,
-    mediaType: MediaType.image,
-    fileName: '$id.jpg',
+    mediaType: mediaType,
+    fileName: mediaType == MediaType.video ? '$id.mp4' : '$id.jpg',
     fileSize: 100,
     capturedAt: DateTime.utc(2026, 8, 24),
     width: 100,
     height: 100,
     durationMs: null,
   );
+}
+
+class _FakeVideoStreamSourceLoader implements VideoStreamSourceLoader {
+  final List<int> preparedIds = [];
+
+  @override
+  Future<VideoStreamSource> prepare(int mediaId) async {
+    preparedIds.add(mediaId);
+
+    return VideoStreamSource(
+      uri: Uri.parse('https://example.test/media/$mediaId/original'),
+      headers: const {'Authorization': 'Bearer token'},
+    );
+  }
+}
+
+class _FakeVideoPlaybackController implements VideoPlaybackController {
+  VideoPlayerValue _value = const VideoPlayerValue(
+    duration: Duration(seconds: 65),
+    size: Size(640, 480),
+  );
+
+  int initializeCallCount = 0;
+  int playCallCount = 0;
+  int pauseCallCount = 0;
+  int disposeCallCount = 0;
+  final List<VoidCallback> _listeners = [];
+
+  double get volume => _value.volume;
+
+  @override
+  VideoPlayerValue get value => _value;
+
+  @override
+  Widget buildView() =>
+      const ColoredBox(key: Key('fake-video-view'), color: Colors.black);
+
+  @override
+  Future<void> initialize() async {
+    initializeCallCount++;
+    _update(_value.copyWith(isInitialized: true));
+  }
+
+  @override
+  Future<void> play() async {
+    playCallCount++;
+    _update(_value.copyWith(isPlaying: true));
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCallCount++;
+    _update(_value.copyWith(isPlaying: false));
+  }
+
+  @override
+  Future<void> seekTo(Duration position) async {
+    _update(_value.copyWith(position: position));
+  }
+
+  @override
+  Future<void> setVolume(double volume) async {
+    _update(_value.copyWith(volume: volume));
+  }
+
+  void emitError(String description) {
+    _update(VideoPlayerValue.erroneous(description));
+  }
+
+  @override
+  void addListener(VoidCallback listener) => _listeners.add(listener);
+
+  @override
+  void removeListener(VoidCallback listener) => _listeners.remove(listener);
+
+  @override
+  Future<void> dispose() async {
+    disposeCallCount++;
+    _listeners.clear();
+  }
+
+  void _update(VideoPlayerValue value) {
+    _value = value;
+
+    for (final listener in List<VoidCallback>.of(_listeners)) {
+      listener();
+    }
+  }
 }
 
 class _AppendingMediaListController extends MediaListController {
