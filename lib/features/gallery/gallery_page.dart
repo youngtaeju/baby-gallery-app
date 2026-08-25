@@ -5,6 +5,7 @@ import '../../core/api_exception.dart';
 import '../auth/auth_controller.dart';
 import 'media_list_controller.dart';
 import 'media_models.dart';
+import 'media_viewer_page.dart';
 import 'thumbnail_loader.dart';
 
 class GalleryPage extends ConsumerStatefulWidget {
@@ -55,6 +56,22 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
     }
   }
 
+  void _openViewer(MediaItem item) {
+    final items = ref.read(mediaListControllerProvider).value?.items;
+    final initialIndex =
+        items?.indexWhere((candidate) => candidate.id == item.id) ?? -1;
+
+    if (initialIndex < 0) {
+      return;
+    }
+
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => MediaViewerPage(initialIndex: initialIndex),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final media = ref.watch(mediaListControllerProvider);
@@ -82,6 +99,7 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
           child: _MediaScrollView(
             controller: _scrollController,
             state: state,
+            onOpenMedia: _openViewer,
             onLoadMore: () =>
                 ref.read(mediaListControllerProvider.notifier).loadMore(),
           ),
@@ -95,12 +113,15 @@ class _MediaScrollView extends StatelessWidget {
   const _MediaScrollView({
     required this.controller,
     required this.state,
+    required this.onOpenMedia,
     required this.onLoadMore,
   });
 
   final ScrollController controller;
 
   final MediaListState state;
+
+  final ValueChanged<MediaItem> onOpenMedia;
 
   final VoidCallback onLoadMore;
 
@@ -109,6 +130,7 @@ class _MediaScrollView extends StatelessWidget {
     final groups = _groupByDate(state.items);
 
     return CustomScrollView(
+      key: const Key('gallery-scroll'),
       controller: controller,
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
@@ -129,8 +151,11 @@ class _MediaScrollView extends StatelessWidget {
                   crossAxisSpacing: 2,
                 ),
                 itemCount: group.items.length,
-                itemBuilder: (context, index) =>
-                    _MediaTile(item: group.items[index]),
+                itemBuilder: (context, index) {
+                  final item = group.items[index];
+
+                  return _MediaTile(item: item, onTap: () => onOpenMedia(item));
+                },
               ),
             ),
           ],
@@ -173,9 +198,11 @@ class _DateHeader extends StatelessWidget {
 }
 
 class _MediaTile extends ConsumerWidget {
-  const _MediaTile({required this.item});
+  const _MediaTile({required this.item, required this.onTap});
 
   final MediaItem item;
+
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -185,34 +212,40 @@ class _MediaTile extends ConsumerWidget {
         : '${item.fileName}, 이미지';
 
     return Semantics(
+      button: true,
       image: true,
       label: label,
       child: ExcludeSemantics(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ColoredBox(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: loader.when(
-                loading: () => const _ThumbnailPlaceholder(),
-                error: (error, stackTrace) => const _ThumbnailUnavailable(),
-                data: (loader) => Image(
-                  image: loader.imageProvider(item.id),
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.low,
-                  gaplessPlayback: true,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const _ThumbnailUnavailable(),
+        child: GestureDetector(
+          key: ValueKey('media-tile-${item.id}'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ColoredBox(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: loader.when(
+                  loading: () => const _ThumbnailPlaceholder(),
+                  error: (error, stackTrace) => const _ThumbnailUnavailable(),
+                  data: (loader) => Image(
+                    image: loader.imageProvider(item.id),
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.low,
+                    gaplessPlayback: true,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const _ThumbnailUnavailable(),
+                  ),
                 ),
               ),
-            ),
-            if (item.mediaType == MediaType.video)
-              Positioned(
-                right: 6,
-                bottom: 6,
-                child: _VideoBadge(durationMs: item.durationMs),
-              ),
-          ],
+              if (item.mediaType == MediaType.video)
+                Positioned(
+                  right: 6,
+                  bottom: 6,
+                  child: _VideoBadge(durationMs: item.durationMs),
+                ),
+            ],
+          ),
         ),
       ),
     );
