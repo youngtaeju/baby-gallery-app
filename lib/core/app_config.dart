@@ -1,6 +1,6 @@
 /// 빌드 시점 주입 설정.
 ///
-/// 오버라이드: `flutter build apk --dart-define=API_BASE_URL=https://...`
+/// 오버라이드: `flutter build <target> --dart-define=API_BASE_URL=https://...`
 class AppConfig {
   const AppConfig._();
 

@@ -1,6 +1,6 @@
 # family-gallery-app
 
-가정용 시놀로지 NAS의 이미지·영상을 가족 구성원만 이용하는 갤러리 앱. Android APK 배포.
+가정용 시놀로지 NAS의 이미지·영상을 가족 구성원만 이용하는 Flutter 갤러리 앱. Android/iOS 지원.
 
 - 로그인한 사용자는 전체 미디어 조회 가능
 - 권한은 `viewer` / `editor` 2종. 업로드·삭제는 `editor`만 가능
@@ -9,7 +9,8 @@
 ## 요구 사항
 
 - Flutter 3.44 이상 (Dart 3.12)
-- Android SDK / JDK 17
+- Android: Android SDK / JDK 17
+- iOS: Xcode
 
 ## 프로젝트 구조
 
@@ -25,7 +26,8 @@ lib/
   features/
     auth/                인증 모델·API·상태·화면
     gallery/             미디어 모델·목록 상태·썸네일·그리드 화면
-android/                 Android 전용 빌드 설정
+android/                 Android 빌드 설정
+ios/                     iOS 빌드 설정
 test/
 ```
 
@@ -51,9 +53,11 @@ test/
 ```bash
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:5088
 flutter build apk --release --dart-define=API_BASE_URL=https://family-gallery.kyleju.com
+flutter build ios --release --dart-define=API_BASE_URL=https://family-gallery.kyleju.com
 ```
 
 Android 에뮬레이터에서 호스트의 로컬 API를 호출할 때는 `10.0.2.2`가 호스트 loopback에 대응.
+iOS Simulator에서 로컬 HTTP API를 사용하려면 `127.0.0.1`과 Debug 전용 App Transport Security 예외 설정 필요. 운영 통신은 HTTPS만 허용.
 
 ## 로컬 실행
 
@@ -68,6 +72,7 @@ flutter run
 flutter analyze
 flutter test
 flutter build apk --debug
+flutter build ios --simulator --debug
 ```
 
 ## 라이선스
