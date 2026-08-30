@@ -2,7 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// access / refresh token 보관소. Android EncryptedSharedPreferences 사용.
+/// access / refresh token 보관소. 플랫폼 보안 저장소 사용.
 ///
 /// 요청마다 복호화가 발생하지 않도록 최초 조회분을 메모리에 유지.
 class TokenStorage {
@@ -76,7 +76,7 @@ class TokenStorage {
   }
 }
 
-// v11 기본 생성자가 AES-GCM + RSA OAEP 키 래핑. 별도 옵션 불필요.
+// Android EncryptedSharedPreferences / iOS Keychain 기본 옵션.
 final tokenStorageProvider = Provider<TokenStorage>((ref) {
   return TokenStorage(const FlutterSecureStorage());
 });
