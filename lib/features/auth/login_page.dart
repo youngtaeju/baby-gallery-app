@@ -79,7 +79,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      '가족 갤러리',
+                      'Baby Gallery',
                       style: theme.textTheme.headlineSmall,
                       textAlign: TextAlign.center,
                     ),

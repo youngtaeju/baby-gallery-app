@@ -6,7 +6,7 @@ class AppConfig {
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://family-gallery.kyleju.com',
+    defaultValue: 'https://baby-gallery.kyleju.com',
   );
 
   static const Duration connectTimeout = Duration(seconds: 10);

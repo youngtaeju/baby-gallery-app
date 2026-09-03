@@ -1,10 +1,10 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:family_gallery/core/api_exception.dart';
-import 'package:family_gallery/features/gallery/media_list_controller.dart';
-import 'package:family_gallery/features/gallery/media_models.dart';
-import 'package:family_gallery/features/gallery/media_repository.dart';
+import 'package:baby_gallery/core/api_exception.dart';
+import 'package:baby_gallery/features/gallery/media_list_controller.dart';
+import 'package:baby_gallery/features/gallery/media_models.dart';
+import 'package:baby_gallery/features/gallery/media_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 

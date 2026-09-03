@@ -1,10 +1,10 @@
-# family-gallery-app
+# baby-gallery-app
 
 가정용 시놀로지 NAS의 이미지·영상을 가족 구성원만 이용하는 Flutter 갤러리 앱. Android/iOS 지원.
 
 - 로그인한 사용자는 전체 미디어 조회 가능
 - 권한은 `viewer` / `editor` 2종. 업로드·삭제는 `editor`만 가능
-- 백엔드는 `family-gallery-api` 단독. 운영 통신은 HTTPS만 허용
+- 백엔드는 `baby-gallery-api` 단독. 운영 통신은 HTTPS만 허용
 
 ## 요구 사항
 
@@ -46,14 +46,14 @@ test/
 
 | 키 | 설명 | 기본값 |
 | --- | --- | --- |
-| `API_BASE_URL` | API 서버 주소 | `https://family-gallery.kyleju.com` |
+| `API_BASE_URL` | API 서버 주소 | `https://baby-gallery.kyleju.com` |
 
 빌드 시점에 `--dart-define`으로 주입. 미지정 시 기본값 사용.
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:5088
-flutter build apk --release --dart-define=API_BASE_URL=https://family-gallery.kyleju.com
-flutter build ios --release --dart-define=API_BASE_URL=https://family-gallery.kyleju.com
+flutter build apk --release --dart-define=API_BASE_URL=https://baby-gallery.kyleju.com
+flutter build ios --release --dart-define=API_BASE_URL=https://baby-gallery.kyleju.com
 ```
 
 Android 에뮬레이터에서 호스트의 로컬 API를 호출할 때는 `10.0.2.2`가 호스트 loopback에 대응.
