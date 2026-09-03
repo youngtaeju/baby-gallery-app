@@ -78,7 +78,7 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('가족 갤러리'),
+        title: const Text('Baby Gallery'),
         actions: [
           IconButton(
             onPressed: () =>

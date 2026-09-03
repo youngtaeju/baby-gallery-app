@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'features/auth/auth_gate.dart';
 
-class FamilyGalleryApp extends StatelessWidget {
-  const FamilyGalleryApp({super.key});
+class BabyGalleryApp extends StatelessWidget {
+  const BabyGalleryApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '가족 갤러리',
+      title: 'Baby Gallery',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),

@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:family_gallery/core/token_storage.dart';
-import 'package:family_gallery/features/gallery/video_streaming.dart';
+import 'package:baby_gallery/core/token_storage.dart';
+import 'package:baby_gallery/features/gallery/video_streaming.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 

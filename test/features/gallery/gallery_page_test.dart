@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:family_gallery/features/auth/auth_controller.dart';
-import 'package:family_gallery/features/auth/auth_models.dart';
-import 'package:family_gallery/features/gallery/gallery_page.dart';
-import 'package:family_gallery/features/gallery/media_list_controller.dart';
-import 'package:family_gallery/features/gallery/media_models.dart';
-import 'package:family_gallery/features/gallery/thumbnail_loader.dart';
+import 'package:baby_gallery/features/auth/auth_controller.dart';
+import 'package:baby_gallery/features/auth/auth_models.dart';
+import 'package:baby_gallery/features/gallery/gallery_page.dart';
+import 'package:baby_gallery/features/gallery/media_list_controller.dart';
+import 'package:baby_gallery/features/gallery/media_models.dart';
+import 'package:baby_gallery/features/gallery/thumbnail_loader.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

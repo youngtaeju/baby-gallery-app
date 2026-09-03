@@ -1,7 +1,7 @@
-import 'package:family_gallery/app.dart';
-import 'package:family_gallery/features/auth/auth_controller.dart';
-import 'package:family_gallery/features/auth/auth_models.dart';
-import 'package:family_gallery/features/gallery/media_list_controller.dart';
+import 'package:baby_gallery/app.dart';
+import 'package:baby_gallery/features/auth/auth_controller.dart';
+import 'package:baby_gallery/features/auth/auth_models.dart';
+import 'package:baby_gallery/features/gallery/media_list_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -29,7 +29,7 @@ Future<void> _pumpApp(WidgetTester tester, AuthUser? user) async {
         authControllerProvider.overrideWith(() => _FixedAuthController(user)),
         mediaListControllerProvider.overrideWith(_EmptyMediaListController.new),
       ],
-      child: const FamilyGalleryApp(),
+      child: const BabyGalleryApp(),
     ),
   );
 
@@ -55,7 +55,7 @@ void main() {
       ),
     );
 
-    expect(find.text('가족 갤러리'), findsOneWidget);
+    expect(find.text('Baby Gallery'), findsOneWidget);
     expect(find.text('아직 미디어가 없습니다.'), findsOneWidget);
   });
 }

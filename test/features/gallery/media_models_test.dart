@@ -1,4 +1,4 @@
-import 'package:family_gallery/features/gallery/media_models.dart';
+import 'package:baby_gallery/features/gallery/media_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

@@ -1,4 +1,4 @@
-package com.kyleju.family_gallery
+package com.kyleju.babygallery
 
 import io.flutter.embedding.android.FlutterActivity
 
