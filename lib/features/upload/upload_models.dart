@@ -1,3 +1,30 @@
+class LocalUploadFile {
+  const LocalUploadFile({required this.path, required this.fileName});
+
+  final String path;
+
+  final String fileName;
+}
+
+class PreparedUpload {
+  const PreparedUpload({
+    required this.source,
+    required this.fileSize,
+    required this.contentHash,
+    required this.existingMediaId,
+  });
+
+  final LocalUploadFile source;
+
+  final int fileSize;
+
+  final String contentHash;
+
+  final int? existingMediaId;
+
+  bool get needsUpload => existingMediaId == null;
+}
+
 class UploadLookupResult {
   const UploadLookupResult({required this.hash, required this.mediaId});
 

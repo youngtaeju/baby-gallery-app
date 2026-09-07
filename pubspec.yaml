@@ -14,6 +14,7 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^3.4.2
+  crypto: ^3.0.7
   dio: ^5.11.0
   dio_cache_interceptor: ^4.0.7
   http_cache_file_store: ^2.0.2
