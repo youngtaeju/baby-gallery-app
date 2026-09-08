@@ -25,6 +25,83 @@ class PreparedUpload {
   bool get needsUpload => existingMediaId == null;
 }
 
+enum UploadJobStatus {
+  pending,
+  uploading,
+  completed,
+  failed;
+
+  static UploadJobStatus parse(Object? value) {
+    return UploadJobStatus.values.firstWhere(
+      (status) => status.name == value,
+      orElse: () => throw const FormatException('알 수 없는 업로드 상태입니다.'),
+    );
+  }
+}
+
+class UploadJob {
+  const UploadJob({
+    required this.upload,
+    required this.status,
+    this.sentBytes = 0,
+    this.mediaId,
+    this.isDuplicate = false,
+    this.errorMessage,
+  });
+
+  factory UploadJob.fromJson(
+    Map<String, dynamic> json, {
+    required String sourcePath,
+  }) {
+    final existingMediaId = (json['existingMediaId'] as num?)?.toInt();
+
+    return UploadJob(
+      upload: PreparedUpload(
+        source: LocalUploadFile(
+          path: sourcePath,
+          fileName: json['fileName'] as String,
+        ),
+        fileSize: (json['fileSize'] as num).toInt(),
+        contentHash: json['contentHash'] as String,
+        existingMediaId: existingMediaId,
+      ),
+      status: UploadJobStatus.parse(json['status']),
+      sentBytes: (json['sentBytes'] as num?)?.toInt() ?? 0,
+      mediaId: (json['mediaId'] as num?)?.toInt(),
+      isDuplicate: json['isDuplicate'] as bool? ?? false,
+      errorMessage: json['errorMessage'] as String?,
+    );
+  }
+
+  final PreparedUpload upload;
+
+  String get id => upload.contentHash;
+
+  final UploadJobStatus status;
+
+  final int sentBytes;
+
+  final int? mediaId;
+
+  final bool isDuplicate;
+
+  final String? errorMessage;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'fileName': upload.source.fileName,
+      'fileSize': upload.fileSize,
+      'contentHash': upload.contentHash,
+      'existingMediaId': upload.existingMediaId,
+      'status': status.name,
+      'sentBytes': sentBytes,
+      'mediaId': mediaId,
+      'isDuplicate': isDuplicate,
+      'errorMessage': errorMessage,
+    };
+  }
+}
+
 class UploadLookupResult {
   const UploadLookupResult({required this.hash, required this.mediaId});
 
