@@ -87,6 +87,25 @@ class UploadJob {
 
   final String? errorMessage;
 
+  UploadJob copyWith({
+    UploadJobStatus? status,
+    int? sentBytes,
+    Object? mediaId = _unset,
+    bool? isDuplicate,
+    Object? errorMessage = _unset,
+  }) {
+    return UploadJob(
+      upload: upload,
+      status: status ?? this.status,
+      sentBytes: sentBytes ?? this.sentBytes,
+      mediaId: identical(mediaId, _unset) ? this.mediaId : mediaId as int?,
+      isDuplicate: isDuplicate ?? this.isDuplicate,
+      errorMessage: identical(errorMessage, _unset)
+          ? this.errorMessage
+          : errorMessage as String?,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'fileName': upload.source.fileName,
@@ -101,6 +120,8 @@ class UploadJob {
     };
   }
 }
+
+const Object _unset = Object();
 
 class UploadLookupResult {
   const UploadLookupResult({required this.hash, required this.mediaId});
