@@ -19,6 +19,7 @@ dependencies:
   dio_cache_interceptor: ^4.0.7
   http_cache_file_store: ^2.0.2
   http: ^1.6.0
+  image_picker: ^1.2.3
   path_provider: ^2.1.6
   # 11.x는 compileSdk 37 요구. 로컬 SDK가 android-37.0으로 설치되어 미해결.
   flutter_secure_storage: ^10.0.0

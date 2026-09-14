@@ -1,8 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_exception.dart';
 import '../auth/auth_controller.dart';
+import '../upload/upload_controller.dart';
+import '../upload/upload_file_picker.dart';
+import '../upload/upload_models.dart';
+import '../upload/upload_queue_sheet.dart';
 import 'media_list_controller.dart';
 import 'media_models.dart';
 import 'media_viewer_page.dart';
@@ -19,6 +25,7 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
   static const double _loadMoreThreshold = 600;
 
   final _scrollController = ScrollController();
+  bool _didRestoreLostUploadSelection = false;
 
   @override
   void initState() {
@@ -56,6 +63,68 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
     }
   }
 
+  Future<void> _selectUploadFiles() async {
+    try {
+      final files = await ref.read(uploadFilePickerProvider).pickFiles();
+      await _addUploadFiles(files);
+    } catch (error) {
+      _showUploadError(error);
+    }
+  }
+
+  Future<void> _restoreLostUploadSelection() async {
+    try {
+      final files = await ref
+          .read(uploadFilePickerProvider)
+          .retrieveLostFiles();
+      await _addUploadFiles(files);
+    } catch (error) {
+      _showUploadError(error);
+    }
+  }
+
+  Future<void> _addUploadFiles(List<LocalUploadFile> files) async {
+    if (files.isEmpty || !mounted) {
+      return;
+    }
+
+    await ref.read(uploadControllerProvider.notifier).addFiles(files);
+  }
+
+  void _showUploadError(Object error) {
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_uploadMessageOf(error))));
+  }
+
+  void _restoreLostUploadSelectionOnce() {
+    if (_didRestoreLostUploadSelection) {
+      return;
+    }
+
+    _didRestoreLostUploadSelection = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      unawaited(_restoreLostUploadSelection());
+    });
+  }
+
+  Future<void> _showUploadQueue() {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => UploadQueueSheet(onSelectFiles: _selectUploadFiles),
+    );
+  }
+
   void _openViewer(MediaItem item) {
     final items = ref.read(mediaListControllerProvider).value?.items;
     final initialIndex =
@@ -75,11 +144,36 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
   @override
   Widget build(BuildContext context) {
     final media = ref.watch(mediaListControllerProvider);
+    final canEdit = ref.watch(authControllerProvider).value?.canEdit == true;
+    final uploads = canEdit ? ref.watch(uploadControllerProvider) : null;
+
+    if (canEdit) {
+      _restoreLostUploadSelectionOnce();
+      ref.listen(uploadControllerProvider, (previous, next) {
+        final previousCompleted = _completedUploadIds(previous?.value);
+        final completed = _completedUploadIds(next.value);
+
+        if (completed.difference(previousCompleted).isNotEmpty) {
+          unawaited(_refresh());
+        }
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Baby Gallery'),
         actions: [
+          if (canEdit)
+            IconButton(
+              key: const Key('open-upload-queue'),
+              onPressed: _showUploadQueue,
+              icon: Badge.count(
+                count: uploads?.value?.jobs.length ?? 0,
+                isLabelVisible: (uploads?.value?.jobs.length ?? 0) > 0,
+                child: const Icon(Icons.cloud_upload_outlined),
+              ),
+              tooltip: '업로드',
+            ),
           IconButton(
             onPressed: () =>
                 ref.read(authControllerProvider.notifier).signOut(),
@@ -457,4 +551,16 @@ String _formatDuration(int durationMs) {
 
 String _messageOf(Object error) {
   return error is ApiException ? error.message : '미디어를 불러오지 못했습니다.';
+}
+
+Set<String> _completedUploadIds(UploadQueueState? state) {
+  return state?.jobs
+          .where((job) => job.status == UploadJobStatus.completed)
+          .map((job) => job.id)
+          .toSet() ??
+      const {};
+}
+
+String _uploadMessageOf(Object error) {
+  return error is ApiException ? error.message : '파일을 선택하거나 준비하지 못했습니다.';
 }
