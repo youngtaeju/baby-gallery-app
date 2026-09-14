@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -22,6 +23,12 @@ typedef UploadProgressCallback = void Function(int sentBytes, int totalBytes);
 
 abstract interface class UploadTransport {
   Future<Uri> send(PreparedUpload upload, {UploadProgressCallback? onProgress});
+
+  Future<void> pause();
+}
+
+class UploadPausedException implements Exception {
+  const UploadPausedException();
 }
 
 class TusUploadTransport implements UploadTransport {
@@ -36,13 +43,14 @@ class TusUploadTransport implements UploadTransport {
   final TusCache cache;
   final http.Client httpClient;
   final List<Duration> retryDelays;
+  _ContentHashTusClient? _activeClient;
 
   @override
   Future<Uri> send(
     PreparedUpload upload, {
     UploadProgressCallback? onProgress,
   }) async {
-    final file = File(upload.source.path);
+    final file = XFile(upload.source.path);
     final client = _ContentHashTusClient(
       endpoint: endpoint,
       file: file,
@@ -51,11 +59,16 @@ class TusUploadTransport implements UploadTransport {
       httpClient: httpClient,
       retryDelays: retryDelays,
     );
+    _activeClient = client;
 
     try {
       await client.startUpload(
         onProgress: (sent, total, response) => onProgress?.call(sent, total),
       );
+
+      if (client.state == TusUploadState.paused) {
+        throw const UploadPausedException();
+      }
 
       if (client.state != TusUploadState.completed) {
         throw StateError('업로드가 완료되지 않았습니다.');
@@ -71,7 +84,20 @@ class TusUploadTransport implements UploadTransport {
     } on DioException catch (error) {
       throw ApiException.from(error);
     } finally {
+      if (identical(_activeClient, client)) {
+        _activeClient = null;
+      }
+
       client.close();
+    }
+  }
+
+  @override
+  Future<void> pause() async {
+    final pause = _activeClient?.pauseUpload();
+
+    if (pause != null) {
+      await pause;
     }
   }
 
@@ -109,6 +135,8 @@ class UploadTransferService {
   final UploadTransport _transport;
   final UploadRepository _repository;
 
+  Future<void> pause() => _transport.pause();
+
   Future<UploadCommitResult> transfer(
     PreparedUpload upload, {
     UploadProgressCallback? onProgress,
@@ -138,20 +166,18 @@ class UploadTransferService {
   }
 }
 
-class _ContentHashTusClient extends TusStreamClient {
+class _ContentHashTusClient extends TusClient {
   _ContentHashTusClient({
     required Uri endpoint,
-    required File file,
+    required super.file,
     required PreparedUpload upload,
     required TusCache cache,
     required http.Client httpClient,
     required List<Duration> retryDelays,
   }) : _contentHash = upload.contentHash,
+       _originalFileName = upload.source.fileName,
        super(
          url: endpoint.toString(),
-         fileStreamGenerator: file.openRead,
-         fileSize: upload.fileSize,
-         fileName: upload.source.fileName,
          chunkSize: uploadChunkSize,
          cache: cache,
          headers: const {'Accept': 'application/json'},
@@ -162,6 +188,10 @@ class _ContentHashTusClient extends TusStreamClient {
        );
 
   final String _contentHash;
+  final String _originalFileName;
+
+  @override
+  String get fileName => _originalFileName;
 
   // 같은 이름·크기의 파일이 바뀌어도 다른 세션으로 취급.
   @override

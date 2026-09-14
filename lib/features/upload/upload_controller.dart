@@ -44,6 +44,8 @@ class UploadController extends AsyncNotifier<UploadQueueState> {
   static const int _progressStep = 256 * 1024;
 
   bool _draining = false;
+  bool _paused = false;
+  Completer<void>? _drainCompleter;
   Future<void> _writeTail = Future.value();
 
   @override
@@ -186,15 +188,45 @@ class UploadController extends AsyncNotifier<UploadQueueState> {
     }
   }
 
+  Future<void> pause() async {
+    _paused = true;
+    final drain = _drainCompleter?.future;
+
+    if (state.value?.isUploading == true) {
+      final transfer = await ref.read(uploadTransferServiceProvider.future);
+      await transfer.pause();
+    }
+
+    if (drain != null) {
+      await drain;
+    }
+  }
+
+  void resume() {
+    if (!_paused) {
+      return;
+    }
+
+    _paused = false;
+    unawaited(_drain());
+  }
+
   Future<void> _drain() async {
-    if (_draining || state.value == null) {
+    if (_draining) {
+      await _drainCompleter?.future;
+      return;
+    }
+
+    if (_paused || state.value == null) {
       return;
     }
 
     _draining = true;
+    final completer = Completer<void>();
+    _drainCompleter = completer;
 
     try {
-      while (ref.mounted) {
+      while (ref.mounted && !_paused) {
         final pending = state.requireValue.jobs
             .where((job) => job.status == UploadJobStatus.pending)
             .firstOrNull;
@@ -212,6 +244,13 @@ class UploadController extends AsyncNotifier<UploadQueueState> {
         try {
           await _persist();
           final transfer = await ref.read(uploadTransferServiceProvider.future);
+
+          if (_paused) {
+            _replaceJob(uploading.copyWith(status: UploadJobStatus.pending));
+            await _persist();
+            return;
+          }
+
           var reportedBytes = uploading.sentBytes;
           final result = await transfer.transfer(
             uploading.upload,
@@ -253,6 +292,24 @@ class UploadController extends AsyncNotifier<UploadQueueState> {
           } on FileSystemException {
             // 큐에서는 완료 처리 유지. 남은 관리 파일은 같은 해시 재선택 시 재사용.
           }
+        } on UploadPausedException {
+          if (!ref.mounted) {
+            return;
+          }
+
+          final currentJob = _job(uploading.id);
+
+          if (currentJob != null) {
+            _replaceJob(
+              currentJob.copyWith(
+                status: UploadJobStatus.pending,
+                errorMessage: null,
+              ),
+            );
+            await _persist();
+          }
+
+          return;
         } catch (error) {
           if (!ref.mounted) {
             return;
@@ -273,6 +330,11 @@ class UploadController extends AsyncNotifier<UploadQueueState> {
       }
     } finally {
       _draining = false;
+      completer.complete();
+
+      if (identical(_drainCompleter, completer)) {
+        _drainCompleter = null;
+      }
     }
   }
 

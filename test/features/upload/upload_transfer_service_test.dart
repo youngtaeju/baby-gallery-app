@@ -76,6 +76,33 @@ void main() {
     expect(server.offset, uploadChunkSize + 3);
   });
 
+  test('일시 중단한 tus 세션을 같은 오프셋에서 재개한다', () async {
+    final fixture = await _UploadFixture.create(uploadChunkSize + 3);
+    addTearDown(fixture.dispose);
+    final cache = TusMemoryCache();
+    final server = _TusServerClient(holdFirstPatch: true);
+    final transport = TusUploadTransport(
+      endpoint: Uri.parse('https://example.test/media/uploads'),
+      cache: cache,
+      httpClient: server,
+      retryDelays: const [],
+    );
+
+    final firstAttempt = transport.send(fixture.upload);
+    await server.patchStarted.future;
+    await transport.pause();
+    server.releasePatch();
+
+    await expectLater(firstAttempt, throwsA(isA<UploadPausedException>()));
+    expect(server.offset, uploadChunkSize);
+
+    await transport.send(fixture.upload);
+
+    expect(server.createCount, 1);
+    expect(server.headOffsets, [0, uploadChunkSize]);
+    expect(server.offset, uploadChunkSize + 3);
+  });
+
   test('신규 업로드 완료 후 URL의 fileId로 편입 요청한다', () async {
     late RequestOptions commitRequest;
     final dio = Dio(BaseOptions(baseUrl: 'https://example.test'))
@@ -163,9 +190,10 @@ class _UploadFixture {
 }
 
 class _TusServerClient extends http.BaseClient {
-  _TusServerClient({this.failPatchNumber});
+  _TusServerClient({this.failPatchNumber, this.holdFirstPatch = false});
 
   int? failPatchNumber;
+  final bool holdFirstPatch;
   int createCount = 0;
   int patchCount = 0;
   int offset = 0;
@@ -173,6 +201,14 @@ class _TusServerClient extends http.BaseClient {
   String? createdMetadata;
   final List<int> headOffsets = [];
   final List<int> chunkLengths = [];
+  final Completer<void> patchStarted = Completer<void>();
+  final Completer<void> _patchRelease = Completer<void>();
+
+  void releasePatch() {
+    if (!_patchRelease.isCompleted) {
+      _patchRelease.complete();
+    }
+  }
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -195,6 +231,11 @@ class _TusServerClient extends http.BaseClient {
         patchCount++;
         final chunk = await _readBytes(request);
         chunkLengths.add(chunk.length);
+
+        if (holdFirstPatch && patchCount == 1) {
+          patchStarted.complete();
+          await _patchRelease.future;
+        }
 
         if (patchCount == failPatchNumber) {
           return _response(503);
@@ -233,6 +274,9 @@ class _StubTransport implements UploadTransport {
 
   final Uri result;
   int sendCount = 0;
+
+  @override
+  Future<void> pause() async {}
 
   @override
   Future<Uri> send(

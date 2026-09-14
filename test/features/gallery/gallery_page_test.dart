@@ -116,6 +116,47 @@ void main() {
     expect(uploadController.addedFiles.single.fileName, '복구 사진.jpg');
   });
 
+  testWidgets('앱 백그라운드 진입 시 업로드를 멈추고 복귀 시 재개한다', (tester) async {
+    final uploadController = _FixedUploadController(UploadQueueState(jobs: []));
+
+    await _pumpGallery(
+      tester,
+      _FixedMediaListController(MediaListState(items: [], nextCursor: null)),
+      role: UserRole.editor,
+      uploadController: uploadController,
+      uploadFilePicker: _FakeUploadFilePicker(const []),
+    );
+
+    expect(uploadController.resumeCallCount, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(uploadController.pauseCallCount, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(uploadController.resumeCallCount, 2);
+  });
+
+  testWidgets('로그아웃 전에 진행 중인 업로드를 일시 중단한다', (tester) async {
+    final authController = _SignedInAuthController(UserRole.editor);
+    final uploadController = _FixedUploadController(UploadQueueState(jobs: []));
+
+    await _pumpGallery(
+      tester,
+      _FixedMediaListController(MediaListState(items: [], nextCursor: null)),
+      authController: authController,
+      uploadController: uploadController,
+      uploadFilePicker: _FakeUploadFilePicker(const []),
+    );
+
+    await tester.tap(find.byTooltip('로그아웃'));
+    await tester.pump();
+
+    expect(uploadController.pauseCallCount, 1);
+    expect(authController.signOutCallCount, 1);
+  });
+
   testWidgets('실패한 업로드를 대기열 시트에서 다시 시도한다', (tester) async {
     final failedJob = UploadJob(
       upload: const PreparedUpload(
@@ -270,6 +311,7 @@ Future<void> _pumpGallery(
   _FixedMediaListController mediaController, {
   ThemeData? theme,
   UserRole role = UserRole.viewer,
+  _SignedInAuthController? authController,
   _FixedUploadController? uploadController,
   UploadFilePicker? uploadFilePicker,
 }) async {
@@ -279,7 +321,7 @@ Future<void> _pumpGallery(
     ProviderScope(
       overrides: [
         authControllerProvider.overrideWith(
-          () => _SignedInAuthController(role),
+          () => authController ?? _SignedInAuthController(role),
         ),
         mediaListControllerProvider.overrideWith(() => mediaController),
         thumbnailLoaderProvider.overrideWith((ref) => pendingLoader.future),
@@ -316,10 +358,16 @@ class _SignedInAuthController extends AuthController {
   _SignedInAuthController(this.role);
 
   final UserRole role;
+  int signOutCallCount = 0;
 
   @override
   Future<AuthUser?> build() async {
     return AuthUser(id: 1, username: 'tester', displayName: '테스터', role: role);
+  }
+
+  @override
+  Future<void> signOut() async {
+    signOutCallCount++;
   }
 }
 
@@ -352,6 +400,8 @@ class _FixedUploadController extends UploadController {
   final List<LocalUploadFile> addedFiles = [];
   final List<String> retriedIds = [];
   final List<String> removedIds = [];
+  int pauseCallCount = 0;
+  int resumeCallCount = 0;
 
   @override
   Future<UploadQueueState> build() async => _state;
@@ -369,6 +419,16 @@ class _FixedUploadController extends UploadController {
   @override
   Future<void> remove(String id) async {
     removedIds.add(id);
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCallCount++;
+  }
+
+  @override
+  void resume() {
+    resumeCallCount++;
   }
 
   void completeUpload() {

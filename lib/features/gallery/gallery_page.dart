@@ -21,24 +21,50 @@ class GalleryPage extends ConsumerStatefulWidget {
   ConsumerState<GalleryPage> createState() => _GalleryPageState();
 }
 
-class _GalleryPageState extends ConsumerState<GalleryPage> {
+class _GalleryPageState extends ConsumerState<GalleryPage>
+    with WidgetsBindingObserver {
   static const double _loadMoreThreshold = 600;
 
   final _scrollController = ScrollController();
   bool _didRestoreLostUploadSelection = false;
+  UploadController? _uploadController;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_loadMoreIfNeeded);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+
+    final uploadController = _uploadController;
+
+    if (uploadController != null) {
+      unawaited(uploadController.pause());
+    }
+
     _scrollController
       ..removeListener(_loadMoreIfNeeded)
       ..dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final uploads = _uploadController;
+
+    if (uploads == null) {
+      return;
+    }
+
+    if (state == AppLifecycleState.resumed) {
+      uploads.resume();
+    } else {
+      unawaited(uploads.pause());
+    }
   }
 
   void _loadMoreIfNeeded() {
@@ -112,8 +138,17 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
         return;
       }
 
+      _uploadController?.resume();
       unawaited(_restoreLostUploadSelection());
     });
+  }
+
+  Future<void> _signOut() async {
+    await _uploadController?.pause();
+
+    if (mounted) {
+      await ref.read(authControllerProvider.notifier).signOut();
+    }
   }
 
   Future<void> _showUploadQueue() {
@@ -148,6 +183,7 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
     final uploads = canEdit ? ref.watch(uploadControllerProvider) : null;
 
     if (canEdit) {
+      _uploadController = ref.read(uploadControllerProvider.notifier);
       _restoreLostUploadSelectionOnce();
       ref.listen(uploadControllerProvider, (previous, next) {
         final previousCompleted = _completedUploadIds(previous?.value);
@@ -175,8 +211,7 @@ class _GalleryPageState extends ConsumerState<GalleryPage> {
               tooltip: '업로드',
             ),
           IconButton(
-            onPressed: () =>
-                ref.read(authControllerProvider.notifier).signOut(),
+            onPressed: _signOut,
             icon: const Icon(Icons.logout),
             tooltip: '로그아웃',
           ),

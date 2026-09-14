@@ -158,6 +158,44 @@ void main() {
     expect(await storage.load(), isEmpty);
   });
 
+  test('일시 중단한 작업을 pending으로 보관하고 다시 재개한다', () async {
+    final source = await _source(testDirectory, 'pause.jpg', [1, 2, 3]);
+    final upload = _upload(source, '9', size: 3);
+    final transfer = _PausableTransferService();
+    final container = _container(
+      storage: storage,
+      preparation: _FakePreparationService([upload]),
+      transfer: transfer,
+    );
+    addTearDown(container.dispose);
+    await container.read(uploadControllerProvider.future);
+
+    await container.read(uploadControllerProvider.notifier).addFiles([
+      upload.source,
+    ]);
+    await transfer.started.future;
+    await container.read(uploadControllerProvider.notifier).pause();
+    await _waitFor(
+      container,
+      (state) => state.jobs.single.status == UploadJobStatus.pending,
+    );
+
+    var job = container.read(uploadControllerProvider).requireValue.jobs.single;
+    expect(job.errorMessage, isNull);
+    expect((await storage.load()).single.status, UploadJobStatus.pending);
+
+    container.read(uploadControllerProvider.notifier).resume();
+    await _waitFor(
+      container,
+      (state) => state.jobs.single.status == UploadJobStatus.completed,
+    );
+
+    job = container.read(uploadControllerProvider).requireValue.jobs.single;
+    expect(job.mediaId, 2);
+    expect(transfer.pauseCallCount, 1);
+    expect(transfer.attempts, 2);
+  });
+
   test('완료 또는 실패한 작업을 목록에서 제거한다', () async {
     final source = await _source(testDirectory, 'remove.jpg', [1]);
     final retained = await storage.retainSource(_upload(source, 'f', size: 1));
@@ -359,7 +397,43 @@ class _ControlledTransferService extends UploadTransferService {
   }
 }
 
+class _PausableTransferService extends UploadTransferService {
+  _PausableTransferService()
+    : super(_UnusedTransport(), UploadRepository(Dio()));
+
+  final Completer<void> started = Completer<void>();
+  final Completer<void> _paused = Completer<void>();
+  int attempts = 0;
+  int pauseCallCount = 0;
+
+  @override
+  Future<UploadCommitResult> transfer(
+    PreparedUpload upload, {
+    UploadProgressCallback? onProgress,
+  }) async {
+    attempts++;
+
+    if (attempts == 1) {
+      started.complete();
+      await _paused.future;
+      throw const UploadPausedException();
+    }
+
+    onProgress?.call(upload.fileSize, upload.fileSize);
+    return UploadCommitResult(mediaId: attempts, isDuplicate: false);
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCallCount++;
+    _paused.complete();
+  }
+}
+
 class _UnusedTransport implements UploadTransport {
+  @override
+  Future<void> pause() async {}
+
   @override
   Future<Uri> send(
     PreparedUpload upload, {
