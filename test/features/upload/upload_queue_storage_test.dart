@@ -97,6 +97,82 @@ void main() {
     expect(restored.single.upload.source.path, endsWith('a' * 64));
   });
 
+  for (final previousFile in [null, 'queue.json', 'queue.json.backup']) {
+    test('이전 기록 $previousFile 여부와 무관하게 next의 최신 작업을 복구한다', () async {
+      await storageDirectory.create(recursive: true);
+      if (previousFile != null) {
+        await File(
+          '${storageDirectory.path}/$previousFile',
+        ).writeAsString(jsonEncode({'version': 1, 'jobs': []}));
+      }
+      final job = UploadJob(
+        upload: _preparedUpload(sourceFile),
+        status: UploadJobStatus.pending,
+      );
+      await File('${storageDirectory.path}/queue.json.next').writeAsString(
+        jsonEncode({
+          'version': 1,
+          'jobs': [job.toJson()],
+        }),
+        flush: true,
+      );
+
+      expect((await storage.load()).single.id, job.id);
+    });
+  }
+
+  for (final invalidBody in [
+    '{',
+    jsonEncode({'version': 2, 'jobs': []}),
+    jsonEncode({
+      'version': 1,
+      'jobs': [42],
+    }),
+    jsonEncode({
+      'version': 1,
+      'jobs': [
+        {'contentHash': '../outside'},
+      ],
+    }),
+  ]) {
+    test('손상된 next를 건너뛰고 기존 대기열을 복구한다: $invalidBody', () async {
+      await storage.save([
+        UploadJob(
+          upload: _preparedUpload(sourceFile),
+          status: UploadJobStatus.failed,
+        ),
+      ]);
+      await File(
+        '${storageDirectory.path}/queue.json.next',
+      ).writeAsString(invalidBody);
+
+      expect((await storage.load()).single.status, UploadJobStatus.failed);
+    });
+  }
+
+  test('next와 주 파일이 손상되면 백업으로 복구한다', () async {
+    await storage.save([
+      UploadJob(
+        upload: _preparedUpload(sourceFile),
+        status: UploadJobStatus.failed,
+      ),
+    ]);
+    await File(
+      '${storageDirectory.path}/queue.json',
+    ).rename('${storageDirectory.path}/queue.json.backup');
+    await File('${storageDirectory.path}/queue.json').writeAsString('{');
+    await File('${storageDirectory.path}/queue.json.next').writeAsString('{');
+
+    expect((await storage.load()).single.status, UploadJobStatus.failed);
+  });
+
+  test('복구 가능한 기록이 없으면 손상을 빈 대기열로 숨기지 않는다', () async {
+    await storageDirectory.create(recursive: true);
+    await File('${storageDirectory.path}/queue.json.next').writeAsString('{');
+
+    await expectLater(storage.load(), throwsFormatException);
+  });
+
   test('완료한 업로드의 관리 원본을 제거한다', () async {
     final retained = await storage.retainSource(_preparedUpload(sourceFile));
 

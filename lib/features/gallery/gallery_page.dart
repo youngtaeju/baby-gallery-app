@@ -114,6 +114,12 @@ class _GalleryPageState extends ConsumerState<GalleryPage>
       return;
     }
 
+    await ref.read(uploadControllerProvider.future);
+
+    if (!mounted) {
+      return;
+    }
+
     await ref.read(uploadControllerProvider.notifier).addFiles(files);
   }
 

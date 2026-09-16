@@ -60,13 +60,32 @@ class UploadQueueStorage {
   }
 
   Future<List<UploadJob>> load() async {
-    final queueFile = await _readableQueueFile();
+    FormatException? invalidQueue;
 
-    if (queueFile == null) {
-      return const [];
+    // 교체 직전 기록을 우선 복구하고 손상된 후보는 이전 기록으로 대체.
+    for (final file in [_nextQueueFile, _queueFile, _backupQueueFile]) {
+      if (!await file.exists()) {
+        continue;
+      }
+
+      try {
+        return _decodeJobs(await file.readAsString());
+      } on FormatException catch (error) {
+        invalidQueue = error;
+      } on TypeError {
+        invalidQueue = const FormatException('업로드 대기열 파일이 올바르지 않습니다.');
+      }
     }
 
-    final decoded = jsonDecode(await queueFile.readAsString());
+    if (invalidQueue != null) {
+      throw invalidQueue;
+    }
+
+    return const [];
+  }
+
+  List<UploadJob> _decodeJobs(String body) {
+    final decoded = jsonDecode(body);
 
     if (decoded is! Map<String, dynamic> ||
         decoded['version'] != _schemaVersion ||
@@ -123,18 +142,6 @@ class UploadQueueStorage {
     if (await source.exists()) {
       await source.delete();
     }
-  }
-
-  Future<File?> _readableQueueFile() async {
-    if (await _queueFile.exists()) {
-      return _queueFile;
-    }
-
-    if (await _backupQueueFile.exists()) {
-      return _backupQueueFile;
-    }
-
-    return null;
   }
 
   File _sourceFile(String contentHash) =>

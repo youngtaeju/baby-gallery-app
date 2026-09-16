@@ -116,6 +116,78 @@ void main() {
     expect(uploadController.addedFiles.single.fileName, '복구 사진.jpg');
   });
 
+  for (final restoreLost in [false, true]) {
+    testWidgets('${restoreLost ? '복구' : '선택'} 파일을 대기열 초기화 후 전달한다', (
+      tester,
+    ) async {
+      final ready = Completer<void>();
+      final controller = _FixedUploadController(
+        UploadQueueState(jobs: []),
+        ready: ready.future,
+      );
+      const files = [LocalUploadFile(path: 'photo.jpg', fileName: '사진.jpg')];
+      final picker = _FakeUploadFilePicker(
+        restoreLost ? const [] : files,
+        lostFiles: restoreLost ? files : const [],
+      );
+      await _pumpGallery(
+        tester,
+        _FixedMediaListController(MediaListState(items: [], nextCursor: null)),
+        role: UserRole.editor,
+        uploadController: controller,
+        uploadFilePicker: picker,
+      );
+      await tester.pump();
+
+      if (!restoreLost) {
+        await tester.tap(find.byKey(const Key('open-upload-queue')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.byKey(const Key('select-upload-files')));
+        await tester.pump();
+        expect(picker.callCount, 1);
+      } else {
+        expect(picker.retrieveLostCallCount, 1);
+      }
+
+      expect(controller.addedFiles, isEmpty);
+      ready.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(controller.addedFiles, files);
+    });
+  }
+
+  testWidgets('초기화 대기 중 화면이 닫히면 파일을 전달하지 않는다', (tester) async {
+    final ready = Completer<void>();
+    final controller = _FixedUploadController(
+      UploadQueueState(jobs: []),
+      ready: ready.future,
+    );
+    await _pumpGallery(
+      tester,
+      _FixedMediaListController(MediaListState(items: [], nextCursor: null)),
+      role: UserRole.editor,
+      uploadController: controller,
+      uploadFilePicker: _FakeUploadFilePicker(
+        const [],
+        lostFiles: const [
+          LocalUploadFile(path: 'photo.jpg', fileName: '사진.jpg'),
+        ],
+      ),
+    );
+    await tester.pump();
+    final context = tester.element(find.byType(GalleryPage));
+    Navigator.of(context).pushReplacement<void, void>(
+      MaterialPageRoute<void>(builder: (_) => const Scaffold()),
+    );
+    await tester.pumpAndSettle();
+    ready.complete();
+    await tester.pump();
+    expect(controller.addedFiles, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('앱 백그라운드 진입 시 업로드를 멈추고 복귀 시 재개한다', (tester) async {
     final uploadController = _FixedUploadController(UploadQueueState(jobs: []));
 
@@ -394,9 +466,10 @@ class _FixedMediaListController extends MediaListController {
 }
 
 class _FixedUploadController extends UploadController {
-  _FixedUploadController(this._state);
+  _FixedUploadController(this._state, {this.ready});
 
   final UploadQueueState _state;
+  final Future<void>? ready;
   final List<LocalUploadFile> addedFiles = [];
   final List<String> retriedIds = [];
   final List<String> removedIds = [];
@@ -404,7 +477,10 @@ class _FixedUploadController extends UploadController {
   int resumeCallCount = 0;
 
   @override
-  Future<UploadQueueState> build() async => _state;
+  Future<UploadQueueState> build() async {
+    await ready;
+    return _state;
+  }
 
   @override
   Future<void> addFiles(List<LocalUploadFile> sources) async {
